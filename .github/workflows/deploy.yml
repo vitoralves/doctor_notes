@@ -11,9 +11,10 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-  LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'consultation-app' }}
+  LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME || 'consultation-app' }}
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::890886303710:role/github-actions-consultation-app' }}
 
 jobs:
   deploy:
@@ -25,7 +26,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -67,6 +68,16 @@ jobs:
           import json
           import os
           import subprocess
+
+          required = [
+              "CLERK_JWKS_URL",
+              "OPENAI_API_KEY",
+              "UPSTASH_REDIS_REST_URL",
+              "UPSTASH_REDIS_REST_TOKEN",
+          ]
+          missing = [k for k in required if not os.environ.get(k)]
+          if missing:
+              raise SystemExit(f"Missing GitHub secrets: {', '.join(missing)}")
 
           variables = {
               "CLERK_JWKS_URL": os.environ["CLERK_JWKS_URL"],

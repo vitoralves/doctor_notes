@@ -2,6 +2,8 @@
 
 Portfolio demo: AI consultation notes with **Next.js**, **FastAPI**, **Clerk**, and a near-zero-cost **AWS** deployment (container on **Lambda** + **ECR**, **DynamoDB**, **S3**, **CloudWatch**).
 
+**Demo:** [https://r22xttnd3dw6woagtzx7vwifrm0xupqv.lambda-url.us-west-2.on.aws/](https://r22xttnd3dw6woagtzx7vwifrm0xupqv.lambda-url.us-west-2.on.aws/)
+
 > Demo only — not for real PHI or clinical use.
 
 **Live pattern:** static Next.js export served by FastAPI inside a Docker image → Amazon ECR → AWS Lambda (Lambda Web Adapter) → Function URL with `RESPONSE_STREAM` for SSE.
@@ -155,7 +157,3 @@ sam deploy --guided
 | GET | `/api/visits` | Clerk JWT | Visit history |
 | GET | `/api/usage` | Clerk JWT | Per-day token/request counters |
 | POST | `/api/exports` | Clerk JWT | Markdown/PDF → S3 presigned URL |
-
-## License
-
-MIT (or your preferred license).
