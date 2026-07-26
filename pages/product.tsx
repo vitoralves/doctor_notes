@@ -206,7 +206,12 @@ function ConsultationWorkspace() {
       });
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
-        throw new Error(detail.detail || "Export failed");
+        const message =
+          typeof detail.detail === "string"
+            ? detail.detail
+            : detail.detail?.message || detail.error_type || "Export failed";
+        const requestId = detail.request_id || res.headers.get("x-request-id");
+        throw new Error(requestId ? `${message} (request_id=${requestId})` : message);
       }
       const data = await res.json();
       window.open(data.url, "_blank", "noopener,noreferrer");
