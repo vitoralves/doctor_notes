@@ -1,0 +1,316 @@
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi_clerk_auth import ClerkConfig, ClerkHTTPBearer, HTTPAuthorizationCredentials
+from openai import OpenAI
+from pydantic import BaseModel, Field
+
+from api.config import CLERK_JWKS_URL, MODEL_NAME, PROMPT_VERSION
+from api.db import create_visit, get_usage_today, get_visit, increment_usage, list_visits
+from api.exports import create_export
+from api.rate_limit import RateLimitExceeded, check_and_increment
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("consultation-app")
+
+app = FastAPI(title="MediNotes Pro API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+clerk_config = ClerkConfig(jwks_url=CLERK_JWKS_URL)
+clerk_guard = ClerkHTTPBearer(clerk_config)
+
+SYSTEM_PROMPT = """
+You are provided with notes written by a doctor from a patient's visit.
+Your job is to summarize the visit for the doctor and provide an email.
+Reply with exactly three sections with the headings:
+### Summary of visit for the doctor's records
+### Next steps for the doctor
+### Draft of email to patient in patient-friendly language
+"""
+
+
+class VisitRequest(BaseModel):
+    patient_name: str = Field(min_length=1)
+    date_of_visit: str = Field(min_length=1)
+    notes: str = Field(min_length=1)
+
+
+class ExportRequest(BaseModel):
+    visit_sk: str
+    format: str = "markdown"
+
+
+def user_prompt_for(visit: VisitRequest) -> str:
+    return f"""Create the summary, next steps and draft email for:
+Patient Name: {visit.patient_name}
+Date of Visit: {visit.date_of_visit}
+Notes:
+{visit.notes}"""
+
+
+def _sse(data: str, event: str | None = None) -> str:
+    lines = data.split("\n")
+    payload = "".join(f"data: {line}\n" for line in lines)
+    if event:
+        return f"event: {event}\n{payload}\n"
+    return f"{payload}\n"
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "prompt_version": PROMPT_VERSION, "model": MODEL_NAME}
+
+
+@app.get("/api/usage")
+def usage(creds: HTTPAuthorizationCredentials = Depends(clerk_guard)):
+    user_id = creds.decoded["sub"]
+    return get_usage_today(user_id)
+
+
+@app.get("/api/visits")
+def visits(
+    creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    user_id = creds.decoded["sub"]
+    items = list_visits(user_id, limit=limit)
+    return {
+        "visits": [
+            {
+                "visit_id": v.get("visit_id"),
+                "sk": v.get("sk"),
+                "patient_name": v.get("patient_name"),
+                "date_of_visit": v.get("date_of_visit"),
+                "summary": v.get("summary"),
+                "notes": v.get("notes"),
+                "model": v.get("model"),
+                "prompt_version": v.get("prompt_version"),
+                "input_tokens": v.get("input_tokens", 0),
+                "output_tokens": v.get("output_tokens", 0),
+                "created_at": v.get("created_at"),
+            }
+            for v in items
+        ]
+    }
+
+
+@app.get("/api/visits/{visit_id}")
+def visit_detail(
+    visit_id: str,
+    sk: str = Query(...),
+    creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
+):
+    user_id = creds.decoded["sub"]
+    item = get_visit(user_id, sk)
+    if not item or item.get("visit_id") != visit_id:
+        raise HTTPException(status_code=404, detail="Visit not found")
+    return item
+
+
+@app.post("/api/exports")
+def export_visit(
+    body: ExportRequest,
+    creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
+):
+    user_id = creds.decoded["sub"]
+    item = get_visit(user_id, body.visit_sk)
+    if not item:
+        raise HTTPException(status_code=404, detail="Visit not found")
+    try:
+        result = create_export(
+            user_id=user_id,
+            visit_id=item["visit_id"],
+            patient_name=item["patient_name"],
+            summary=item["summary"],
+            fmt=body.format,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
+
+
+@app.post("/api/consultation")
+def consultation_summary(
+    visit: VisitRequest,
+    creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
+):
+    user_id = creds.decoded["sub"]
+
+    try:
+        rate = check_and_increment(user_id)
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "message": "Daily generation limit reached",
+                "limit": exc.limit,
+                "used": exc.current,
+            },
+        ) from exc
+    except Exception:
+        logger.exception("rate_limit_check_failed user_id=%s", user_id)
+        rate = {"limit": 0, "used": 0, "remaining": 0}
+
+    client = OpenAI()
+    prompt = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt_for(visit)},
+    ]
+
+    stream = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=prompt,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+
+    def event_stream():
+        buffer_parts: list[str] = []
+        input_tokens = 0
+        output_tokens = 0
+
+        yield _sse(
+            json.dumps(
+                {
+                    "model": MODEL_NAME,
+                    "prompt_version": PROMPT_VERSION,
+                    "rate_limit": rate,
+                }
+            ),
+            event="meta",
+        )
+
+        try:
+            for chunk in stream:
+                if getattr(chunk, "usage", None):
+                    input_tokens = chunk.usage.prompt_tokens or 0
+                    output_tokens = chunk.usage.completion_tokens or 0
+
+                if not chunk.choices:
+                    continue
+
+                text = chunk.choices[0].delta.content
+                if not text:
+                    continue
+
+                buffer_parts.append(text)
+                lines = text.split("\n")
+                for line in lines[:-1]:
+                    yield _sse(line)
+                    yield _sse("  ")
+                yield _sse(lines[-1])
+
+            summary = "".join(buffer_parts)
+            saved = create_visit(
+                user_id=user_id,
+                patient_name=visit.patient_name,
+                date_of_visit=visit.date_of_visit,
+                notes=visit.notes,
+                summary=summary,
+                model=MODEL_NAME,
+                prompt_version=PROMPT_VERSION,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+            usage = increment_usage(
+                user_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+
+            yield _sse(
+                json.dumps(
+                    {
+                        "visit_id": saved["visit_id"],
+                        "sk": saved["sk"],
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "model": MODEL_NAME,
+                        "prompt_version": PROMPT_VERSION,
+                        "usage_today": usage,
+                    }
+                ),
+                event="done",
+            )
+            logger.info(
+                "consultation_complete user_id=%s visit_id=%s model=%s prompt_version=%s in=%s out=%s",
+                user_id,
+                saved["visit_id"],
+                MODEL_NAME,
+                PROMPT_VERSION,
+                input_tokens,
+                output_tokens,
+            )
+        except Exception:
+            logger.exception("consultation_failed user_id=%s", user_id)
+            yield _sse(
+                json.dumps({"message": "Generation failed. Please try again."}),
+                event="error",
+            )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+static_path = Path("static")
+
+
+def _resolve_static(path: str) -> Path | None:
+    cleaned = path.strip("/")
+    if not cleaned:
+        candidate = static_path / "index.html"
+        return candidate if candidate.is_file() else None
+
+    candidates = [
+        static_path / cleaned,
+        static_path / f"{cleaned}.html",
+        static_path / cleaned / "index.html",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+if static_path.exists():
+    next_assets = static_path / "_next"
+    if next_assets.is_dir():
+        app.mount("/_next", StaticFiles(directory=str(next_assets)), name="next_assets")
+
+    @app.get("/")
+    async def serve_root():
+        return FileResponse(static_path / "index.html")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="Not found")
+
+        resolved = _resolve_static(full_path)
+        if resolved:
+            return FileResponse(resolved)
+
+        not_found = static_path / "404.html"
+        if not_found.is_file():
+            return FileResponse(not_found, status_code=404)
+        raise HTTPException(status_code=404, detail="Not found")

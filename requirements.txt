@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+openai
+fastapi-clerk-auth
+pydantic
+boto3
+httpx
+fpdf2
+python-dotenv

@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: MediNotes Pro — Lambda container app with DynamoDB, S3 exports, Function URL streaming
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: consultation-app
+  ClerkJwksUrl:
+    Type: String
+    NoEcho: true
+  OpenAiApiKey:
+    Type: String
+    NoEcho: true
+  UpstashRedisRestUrl:
+    Type: String
+    NoEcho: true
+    Default: ""
+  UpstashRedisRestToken:
+    Type: String
+    NoEcho: true
+    Default: ""
+  RateLimitPerDay:
+    Type: Number
+    Default: 20
+  PromptVersion:
+    Type: String
+    Default: v1
+  ModelName:
+    Type: String
+    Default: gpt-5-nano
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 1024
+
+Resources:
+  VisitsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ProjectName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  ExportsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-exports-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireExports
+            Status: Enabled
+            Prefix: exports/
+            ExpirationInDays: 7
+
+  ConsultationFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DataAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt VisitsTable.Arn
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "${ExportsBucket.Arn}/exports/*"
+
+  ConsultationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Ref ProjectName
+      PackageType: Image
+      Role: !GetAtt ConsultationFunctionRole.Arn
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref VisitsTable
+          S3_EXPORTS_BUCKET: !Ref ExportsBucket
+          CLERK_JWKS_URL: !Ref ClerkJwksUrl
+          OPENAI_API_KEY: !Ref OpenAiApiKey
+          UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
+          UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
+          RATE_LIMIT_PER_DAY: !Ref RateLimitPerDay
+          PROMPT_VERSION: !Ref PromptVersion
+          MODEL_NAME: !Ref ModelName
+          AWS_LWA_INVOKE_MODE: response_stream
+          PORT: "8000"
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+        Cors:
+          AllowOrigins:
+            - "*"
+          AllowMethods:
+            - "*"
+          AllowHeaders:
+            - "*"
+          AllowCredentials: false
+      Tags:
+        Project: !Ref ProjectName
+    Metadata:
+      DockerTag: latest
+      DockerContext: ../
+      Dockerfile: Dockerfile
+
+Outputs:
+  FunctionUrl:
+    Description: Public Function URL (RESPONSE_STREAM)
+    Value: !GetAtt ConsultationFunction.FunctionUrl
+  DynamoTableName:
+    Value: !Ref VisitsTable
+  ExportsBucketName:
+    Value: !Ref ExportsBucket
+  FunctionName:
+    Value: !Ref ConsultationFunction

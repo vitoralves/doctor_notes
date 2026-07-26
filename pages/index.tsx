@@ -1,78 +1,108 @@
-import Image from "next/image";
-import { Geist, Geist_Mono } from "next/font/google";
+"use client";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import Head from "next/head";
+import Link from "next/link";
+import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 
 export default function Home() {
   return (
-    <div
-      className={`${geistSans.className} ${geistMono.className} flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black`}
-    >
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <>
+      <Head>
+        <title>MediNotes Pro</title>
+      </Head>
+      <main className="relative min-h-screen overflow-hidden">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-40"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(20,32,28,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(20,32,28,0.04) 1px, transparent 1px)",
+            backgroundSize: "48px 48px",
+          }}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the index.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs/pages/getting-started?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
+          <nav className="flex items-center justify-between animate-fade-up">
+            <p className="font-[family-name:var(--font-display)] text-2xl md:text-3xl">
+              MediNotes Pro
+            </p>
+            <div>
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button
+                    type="button"
+                    className="rounded-xl bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]"
+                  >
+                    Sign in
+                  </button>
+                </SignInButton>
+              </SignedOut>
+              <SignedIn>
+                <div className="flex items-center gap-3">
+                  <Link
+                    href="/product/"
+                    className="rounded-xl bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]"
+                  >
+                    Open app
+                  </Link>
+                  <UserButton showName={true} />
+                </div>
+              </SignedIn>
+            </div>
+          </nav>
+
+          <section className="flex flex-1 flex-col justify-center py-16 md:py-24">
+            <h1 className="max-w-3xl font-[family-name:var(--font-display)] text-5xl leading-[1.05] tracking-tight md:text-7xl animate-fade-up">
+              MediNotes Pro
+            </h1>
+            <p className="mt-5 max-w-xl text-lg text-[var(--muted)] md:text-xl animate-fade-up-delay">
+              Turn consultation notes into structured summaries, next steps, and
+              patient-ready emails — streamed live, saved to your history.
+            </p>
+
+            <div className="mt-8 flex flex-wrap gap-3 animate-fade-up-delay">
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button
+                    type="button"
+                    className="rounded-xl bg-[var(--accent)] px-6 py-3 font-semibold text-white hover:bg-[var(--accent-strong)]"
+                  >
+                    Start demo
+                  </button>
+                </SignInButton>
+              </SignedOut>
+              <SignedIn>
+                <Link
+                  href="/product/"
+                  className="rounded-xl bg-[var(--accent)] px-6 py-3 font-semibold text-white hover:bg-[var(--accent-strong)]"
+                >
+                  Open workspace
+                </Link>
+              </SignedIn>
+              <a
+                href="https://github.com/vitoralves/doctor_notes"
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-xl border border-[var(--line)] bg-white/70 px-6 py-3 font-semibold"
+              >
+                View on GitHub
+              </a>
+            </div>
+          </section>
+
+          <section className="border-t border-[var(--line)] py-12">
+            <h2 className="font-[family-name:var(--font-display)] text-3xl">Built to show production judgment</h2>
+            <p className="mt-2 max-w-2xl text-[var(--muted)]">
+              Clerk auth and plan gating, FastAPI streaming on AWS Lambda, DynamoDB
+              history, Upstash rate limits, S3 exports, and CloudWatch-friendly logs —
+              optimized for near-zero study cost.
+            </p>
+          </section>
+
+          <footer className="pb-6 text-sm text-[var(--muted)]">
+            Demo only — not for real PHI or clinical use.
+          </footer>
         </div>
       </main>
-    </div>
+    </>
   );
 }
