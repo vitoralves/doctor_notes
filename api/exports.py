@@ -26,10 +26,16 @@ _UNICODE_REPLACEMENTS = {
     "\u2022": "*",
 }
 
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_BULLET_RE = re.compile(r"^[-*+]\s+(.*)$")
+_ORDERED_RE = re.compile(r"^(\d+)\.\s+(.*)$")
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+
 
 def _pdf_safe(text: str) -> str:
     for src, dst in _UNICODE_REPLACEMENTS.items():
         text = text.replace(src, dst)
+    text = _INLINE_CODE_RE.sub(r"\1", text)
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
@@ -38,15 +44,55 @@ def _safe_filename(name: str) -> str:
     return cleaned[:80] or "export"
 
 
+def _write_markdown_pdf(pdf: FPDF, markdown_text: str) -> None:
+    heading_sizes = {1: 16, 2: 14, 3: 12, 4: 11, 5: 11, 6: 11}
+
+    for raw_line in markdown_text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if not stripped:
+            pdf.ln(3)
+            continue
+
+        heading = _HEADING_RE.match(stripped)
+        if heading:
+            level = len(heading.group(1))
+            text = _pdf_safe(heading.group(2))
+            pdf.ln(3)
+            pdf.set_font("Helvetica", "B", heading_sizes.get(level, 11))
+            pdf.multi_cell(0, 7, text)
+            pdf.ln(1)
+            continue
+
+        bullet = _BULLET_RE.match(stripped)
+        if bullet:
+            text = _pdf_safe(bullet.group(1))
+            pdf.set_font("Helvetica", size=11)
+            pdf.set_x(pdf.l_margin + 3)
+            pdf.multi_cell(0, 6, f"* {text}", markdown=True)
+            continue
+
+        ordered = _ORDERED_RE.match(stripped)
+        if ordered:
+            number, content = ordered.group(1), _pdf_safe(ordered.group(2))
+            pdf.set_font("Helvetica", size=11)
+            pdf.set_x(pdf.l_margin + 3)
+            pdf.multi_cell(0, 6, f"{number}. {content}", markdown=True)
+            continue
+
+        pdf.set_font("Helvetica", size=11)
+        pdf.multi_cell(0, 6, _pdf_safe(stripped), markdown=True)
+
+
 def _pdf_bytes(title: str, body: str) -> bytes:
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.multi_cell(0, 8, _pdf_safe(title))
-    pdf.ln(4)
-    pdf.set_font("Helvetica", size=11)
-    pdf.multi_cell(0, 6, _pdf_safe(body))
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.multi_cell(0, 9, _pdf_safe(title))
+    pdf.ln(2)
+    _write_markdown_pdf(pdf, body)
     out = BytesIO()
     pdf.output(out)
     return out.getvalue()
