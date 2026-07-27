@@ -44,8 +44,35 @@ def _safe_filename(name: str) -> str:
     return cleaned[:80] or "export"
 
 
+def _content_width(pdf: FPDF, indent: float = 0) -> float:
+    width = pdf.epw - indent
+    if width < 20:
+        raise ValueError(f"Insufficient PDF content width: {width:.1f}mm")
+    return width
+
+
+def _write_block(
+    pdf: FPDF,
+    text: str,
+    *,
+    indent: float = 0,
+    line_height: float = 6,
+    markdown: bool = False,
+) -> None:
+    pdf.set_x(pdf.l_margin + indent)
+    pdf.multi_cell(
+        _content_width(pdf, indent),
+        line_height,
+        text,
+        markdown=markdown,
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+
+
 def _write_markdown_pdf(pdf: FPDF, markdown_text: str) -> None:
     heading_sizes = {1: 16, 2: 14, 3: 12, 4: 11, 5: 11, 6: 11}
+    list_indent = 6
 
     for raw_line in markdown_text.splitlines():
         line = raw_line.rstrip()
@@ -61,7 +88,7 @@ def _write_markdown_pdf(pdf: FPDF, markdown_text: str) -> None:
             text = _pdf_safe(heading.group(2))
             pdf.ln(3)
             pdf.set_font("Helvetica", "B", heading_sizes.get(level, 11))
-            pdf.multi_cell(0, 7, text)
+            _write_block(pdf, text, line_height=7)
             pdf.ln(1)
             continue
 
@@ -69,20 +96,23 @@ def _write_markdown_pdf(pdf: FPDF, markdown_text: str) -> None:
         if bullet:
             text = _pdf_safe(bullet.group(1))
             pdf.set_font("Helvetica", size=11)
-            pdf.set_x(pdf.l_margin + 3)
-            pdf.multi_cell(0, 6, f"* {text}", markdown=True)
+            _write_block(pdf, f"- {text}", indent=list_indent, markdown=True)
             continue
 
         ordered = _ORDERED_RE.match(stripped)
         if ordered:
             number, content = ordered.group(1), _pdf_safe(ordered.group(2))
             pdf.set_font("Helvetica", size=11)
-            pdf.set_x(pdf.l_margin + 3)
-            pdf.multi_cell(0, 6, f"{number}. {content}", markdown=True)
+            _write_block(
+                pdf,
+                f"{number}. {content}",
+                indent=list_indent,
+                markdown=True,
+            )
             continue
 
         pdf.set_font("Helvetica", size=11)
-        pdf.multi_cell(0, 6, _pdf_safe(stripped), markdown=True)
+        _write_block(pdf, _pdf_safe(stripped), markdown=True)
 
 
 def _pdf_bytes(title: str, body: str) -> bytes:
@@ -90,7 +120,7 @@ def _pdf_bytes(title: str, body: str) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
-    pdf.multi_cell(0, 9, _pdf_safe(title))
+    _write_block(pdf, _pdf_safe(title), line_height=9)
     pdf.ln(2)
     _write_markdown_pdf(pdf, body)
     out = BytesIO()

@@ -6,6 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
+from botocore.exceptions import ClientError, NoCredentialsError
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
@@ -124,6 +125,52 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             "detail": "Internal server error",
             "request_id": request_id,
             "error_type": type(exc).__name__,
+        },
+    )
+
+
+@app.exception_handler(NoCredentialsError)
+async def missing_aws_credentials_handler(request: Request, exc: NoCredentialsError):
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.error(
+        "aws_credentials_missing request_id=%s method=%s path=%s",
+        request_id,
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "AWS credentials not found in this process. "
+                "On Lambda this uses the execution role. "
+                "For local Docker, mount ~/.aws or pass AWS_ACCESS_KEY_ID / "
+                "AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN if needed)."
+            ),
+            "request_id": request_id,
+            "error_type": "NoCredentialsError",
+        },
+    )
+
+
+@app.exception_handler(ClientError)
+async def aws_client_error_handler(request: Request, exc: ClientError):
+    request_id = getattr(request.state, "request_id", "unknown")
+    error = exc.response.get("Error", {}) if getattr(exc, "response", None) else {}
+    logger.exception(
+        "aws_client_error request_id=%s method=%s path=%s code=%s message=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        error.get("Code"),
+        error.get("Message"),
+    )
+    return JSONResponse(
+        status_code=502,
+        content={
+            "detail": f"AWS error: {error.get('Code', 'ClientError')}",
+            "request_id": request_id,
+            "error_type": "ClientError",
         },
     )
 

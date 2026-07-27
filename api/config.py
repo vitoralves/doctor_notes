@@ -11,7 +11,12 @@ except ImportError:
 
 DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "consultation-app")
 S3_EXPORTS_BUCKET = os.getenv("S3_EXPORTS_BUCKET", "consultation-app-exports-890886303710")
-AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-west-2"))
+AWS_REGION = (
+    os.getenv("AWS_REGION")
+    or os.getenv("AWS_DEFAULT_REGION")
+    or os.getenv("DEFAULT_AWS_REGION")
+    or "us-west-2"
+)
 UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL", "")
 UPSTASH_REDIS_REST_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 RATE_LIMIT_PER_DAY = int(os.getenv("RATE_LIMIT_PER_DAY", "20"))

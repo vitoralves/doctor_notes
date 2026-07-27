@@ -114,12 +114,35 @@ uvicorn api.server:app --reload --port 8000
 
 ### Full container
 
+`--env-file .env` loads app secrets (Clerk, OpenAI, Upstash, table/bucket names). It does **not** provide AWS credentials. On Lambda, DynamoDB/S3 use the function IAM role. Locally you must pass host AWS credentials into the container:
+
 ```bash
+set -a && source .env && set +a
+
 docker build \
-  --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_... \
+  --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" \
   -t consultation-app .
-docker run --rm -p 8000:8000 --env-file .env consultation-app
+
+docker run --rm -p 8000:8000 \
+  --env-file .env \
+  -e AWS_REGION=us-west-2 \
+  -v "$HOME/.aws:/root/.aws:ro" \
+  consultation-app
 ```
+
+Or export keys from your shell (SSO/session tokens included when present):
+
+```bash
+docker run --rm -p 8000:8000 \
+  --env-file .env \
+  -e AWS_REGION=us-west-2 \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN \
+  consultation-app
+```
+
+Confirm host creds work first: `aws sts get-caller-identity` and that the identity can call DynamoDB/S3.
 
 ## AWS + GitHub deploy
 
