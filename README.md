@@ -15,7 +15,7 @@ Portfolio demo: AI consultation notes with **Next.js**, **FastAPI**, **Clerk**, 
 | Lambda + container (not ECS Express) | Cheaper and simpler for a study/portfolio workload; pay per invoke |
 | DynamoDB on-demand (not RDS) | Serverless, free-tier friendly, no always-on database cost |
 | S3 for exports | Private objects + short-lived presigned URLs; 7-day lifecycle |
-| Upstash Redis | Free-tier daily rate limits so OpenAI spend cannot runaway |
+| Upstash Redis | Lifetime rate limit (2 generations/account) so OpenAI spend cannot runaway |
 | Clerk | Auth, sessions, and plan gating (`Protect`) without building IAM/Cognito UI |
 
 ## Architecture
@@ -57,7 +57,7 @@ GitHub Actions (OIDC) → ECR push → lambda update-function-code
 | CloudWatch Logs | ~$0 | Stay in free tier; avoid verbose debug in prod |
 | Clerk | $0 | Development instance for portfolio |
 | Upstash Redis | $0 | Free tier REST API |
-| OpenAI API | **Variable** | Real cost driver — mitigated by daily rate limit |
+| OpenAI API | **Variable** | Real cost driver — mitigated by lifetime rate limit + input guardrails |
 
 Avoided on purpose: RDS, ECS/Fargate, ALB, NAT gateway (always-on cost).
 
@@ -65,7 +65,7 @@ Avoided on purpose: RDS, ECS/Fargate, ALB, NAT gateway (always-on cost).
 
 | Threat | Mitigation |
 | --- | --- |
-| Stolen session / API abuse | Clerk JWT required on `/api/*`; daily per-user rate limit |
+| Stolen session / API abuse | Clerk JWT required on `/api/*`; lifetime per-user rate limit (2); off-topic/jailbreak guardrails |
 | Open Function URL | Public URL is intentional for a static+API demo; authorization is application-level (JWT), not Lambda IAM auth |
 | Data exfiltration via export links | S3 block public access; SSE-S3; short-lived presigned URLs |
 | Prompt/model drift | `PROMPT_VERSION` + `MODEL_NAME` stored on each visit |

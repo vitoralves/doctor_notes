@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import httpx
 
 from api.config import (
-    RATE_LIMIT_PER_DAY,
+    RATE_LIMIT_LIFETIME,
     UPSTASH_REDIS_REST_TOKEN,
     UPSTASH_REDIS_REST_URL,
 )
@@ -15,7 +13,7 @@ class RateLimitExceeded(Exception):
     def __init__(self, limit: int, current: int):
         self.limit = limit
         self.current = current
-        super().__init__(f"Rate limit exceeded: {current}/{limit} per day")
+        super().__init__(f"Rate limit exceeded: {current}/{limit} lifetime")
 
 
 def _enabled() -> bool:
@@ -23,13 +21,17 @@ def _enabled() -> bool:
 
 
 def _key(user_id: str) -> str:
-    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return f"ratelimit:{user_id}:{day}"
+    return f"ratelimit:lifetime:{user_id}"
 
 
 def check_and_increment(user_id: str) -> dict[str, int]:
     if not _enabled():
-        return {"limit": RATE_LIMIT_PER_DAY, "remaining": RATE_LIMIT_PER_DAY, "used": 0}
+        return {
+            "limit": RATE_LIMIT_LIFETIME,
+            "remaining": RATE_LIMIT_LIFETIME,
+            "used": 0,
+            "window": "lifetime",
+        }
 
     key = _key(user_id)
     headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
@@ -40,14 +42,12 @@ def check_and_increment(user_id: str) -> dict[str, int]:
         incr.raise_for_status()
         used = int(incr.json()["result"])
 
-        if used == 1:
-            client.get(f"{base}/expire/{key}/86400", headers=headers)
-
-    if used > RATE_LIMIT_PER_DAY:
-        raise RateLimitExceeded(RATE_LIMIT_PER_DAY, used)
+    if used > RATE_LIMIT_LIFETIME:
+        raise RateLimitExceeded(RATE_LIMIT_LIFETIME, used)
 
     return {
-        "limit": RATE_LIMIT_PER_DAY,
+        "limit": RATE_LIMIT_LIFETIME,
         "used": used,
-        "remaining": max(RATE_LIMIT_PER_DAY - used, 0),
+        "remaining": max(RATE_LIMIT_LIFETIME - used, 0),
+        "window": "lifetime",
     }

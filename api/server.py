@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from api.config import CLERK_JWKS_URL, MODEL_NAME, PROMPT_VERSION
 from api.db import create_visit, get_usage_today, get_visit, increment_usage, list_visits
 from api.exports import create_export
+from api.guardrails import SYSTEM_PROMPT, GuardrailViolation, validate_consultation_input
 from api.rate_limit import RateLimitExceeded, check_and_increment
 
 logging.basicConfig(
@@ -41,20 +42,11 @@ app.add_middleware(
 clerk_config = ClerkConfig(jwks_url=CLERK_JWKS_URL)
 clerk_guard = ClerkHTTPBearer(clerk_config)
 
-SYSTEM_PROMPT = """
-You are provided with notes written by a doctor from a patient's visit.
-Your job is to summarize the visit for the doctor and provide an email.
-Reply with exactly three sections with the headings:
-### Summary of visit for the doctor's records
-### Next steps for the doctor
-### Draft of email to patient in patient-friendly language
-"""
-
 
 class VisitRequest(BaseModel):
-    patient_name: str = Field(min_length=1)
-    date_of_visit: str = Field(min_length=1)
-    notes: str = Field(min_length=1)
+    patient_name: str = Field(min_length=1, max_length=120)
+    date_of_visit: str = Field(min_length=10, max_length=10)
+    notes: str = Field(min_length=20, max_length=8000)
 
 
 class ExportRequest(BaseModel):
@@ -333,6 +325,24 @@ def consultation_summary(
     )
 
     try:
+        validate_consultation_input(
+            patient_name=visit.patient_name,
+            date_of_visit=visit.date_of_visit,
+            notes=visit.notes,
+        )
+    except GuardrailViolation as exc:
+        logger.warning(
+            "guardrail_blocked user_id=%s code=%s message=%s",
+            user_id,
+            exc.code,
+            exc.message,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={"message": exc.message, "code": exc.code},
+        ) from exc
+
+    try:
         rate = check_and_increment(user_id)
     except RateLimitExceeded as exc:
         logger.warning(
@@ -344,14 +354,18 @@ def consultation_summary(
         raise HTTPException(
             status_code=429,
             detail={
-                "message": "Daily generation limit reached",
+                "message": "Lifetime generation limit reached (2 consultations per account).",
                 "limit": exc.limit,
                 "used": exc.current,
+                "window": "lifetime",
             },
         ) from exc
     except Exception:
         logger.exception("rate_limit_check_failed user_id=%s", user_id)
-        rate = {"limit": 0, "used": 0, "remaining": 0}
+        raise HTTPException(
+            status_code=503,
+            detail="Rate limit service unavailable. Please try again shortly.",
+        ) from None
 
     client = OpenAI()
     prompt = [

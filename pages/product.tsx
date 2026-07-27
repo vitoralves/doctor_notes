@@ -177,9 +177,23 @@ function ConsultationWorkspace() {
         onclose() {
           setLoading(false);
         },
+        async onopen(response) {
+          if (response.ok) return;
+          let message = `Request failed (${response.status})`;
+          try {
+            const payload = await response.json();
+            if (typeof payload.detail === "string") message = payload.detail;
+            else if (payload.detail?.message) message = payload.detail.message;
+          } catch {
+            /* ignore */
+          }
+          setError(message);
+          setLoading(false);
+          throw new Error(message);
+        },
         onerror(err) {
           console.error("SSE error:", err);
-          setError("Stream interrupted. Please try again.");
+          setError((prev) => prev || "Stream interrupted. Please try again.");
           controller.abort();
           setLoading(false);
           throw err;
