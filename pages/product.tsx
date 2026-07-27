@@ -45,6 +45,9 @@ function ConsultationWorkspace() {
   const [activeVisit, setActiveVisit] = useState<VisitItem | null>(null);
   const [usage, setUsage] = useState<UsageToday | null>(null);
   const [meta, setMeta] = useState<{ model?: string; prompt_version?: string }>({});
+  const [rateLimit, setRateLimit] = useState<{ used?: number; limit?: number; remaining?: number }>({
+    limit: 2,
+  });
   const [exporting, setExporting] = useState<"markdown" | "pdf" | null>(null);
 
   async function authHeaders(): Promise<Record<string, string>> {
@@ -126,6 +129,13 @@ function ConsultationWorkspace() {
                 model: payload.model,
                 prompt_version: payload.prompt_version,
               });
+              if (payload.rate_limit) {
+                setRateLimit({
+                  used: payload.rate_limit.used,
+                  limit: payload.rate_limit.limit ?? 2,
+                  remaining: payload.rate_limit.remaining,
+                });
+              }
             } catch {
               /* ignore */
             }
@@ -255,6 +265,15 @@ function ConsultationWorkspace() {
         <UserButton showName={true} />
       </header>
 
+      <div className="mx-auto mb-5 max-w-7xl rounded-2xl border border-[var(--line)] bg-[#f3f7f1] px-4 py-3 text-sm text-[var(--ink)] animate-fade-up">
+        <p className="font-semibold">Testing demo — limited usage</p>
+        <p className="mt-1 text-[var(--muted)]">
+          This app is for portfolio and testing only, not real clinical use. Each account
+          can generate <span className="font-semibold text-[var(--ink)]">2 consultation summaries</span>{" "}
+          in total (lifetime limit) to keep OpenAI costs near zero.
+        </p>
+      </div>
+
       <div className="mx-auto grid max-w-7xl gap-5 lg:grid-cols-[240px_1fr] animate-fade-up-delay">
         <aside className="rounded-2xl border border-[var(--line)] bg-[var(--panel)]/90 p-4 backdrop-blur">
           <div className="mb-3 flex items-center justify-between">
@@ -269,12 +288,19 @@ function ConsultationWorkspace() {
               Refresh
             </button>
           </div>
-          {usage && (
-            <p className="mb-3 text-xs text-[var(--muted)]">
-              Today: {usage.request_count ?? 0} runs ·{" "}
-              {(usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)} tokens
-            </p>
-          )}
+          <p className="mb-3 text-xs text-[var(--muted)]">
+            Generations used: {rateLimit.used ?? Math.min(visits.length, 2)} /{" "}
+            {rateLimit.limit ?? 2} (lifetime)
+            {typeof rateLimit.remaining === "number" ? (
+              <> · {rateLimit.remaining} remaining</>
+            ) : null}
+            {usage ? (
+              <>
+                {" "}
+                · {(usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)} tokens today
+              </>
+            ) : null}
+          </p>
           <ul className="max-h-[70vh] space-y-2 overflow-y-auto">
             {visits.length === 0 && (
               <li className="text-sm text-[var(--muted)]">No saved visits yet.</li>
@@ -309,9 +335,12 @@ function ConsultationWorkspace() {
             onSubmit={handleSubmit}
             className="flex flex-col rounded-2xl border border-[var(--line)] bg-[var(--panel)]/90 p-5 backdrop-blur"
           >
-            <h1 className="mb-4 font-[family-name:var(--font-display)] text-3xl">
+            <h1 className="mb-2 font-[family-name:var(--font-display)] text-3xl">
               Consultation workspace
             </h1>
+            <p className="mb-4 text-sm text-[var(--muted)]">
+              Demo limit: 2 AI generations per account. Use sample clinical notes only.
+            </p>
 
             <label className="mb-1 text-sm font-medium" htmlFor="patient">
               Patient name

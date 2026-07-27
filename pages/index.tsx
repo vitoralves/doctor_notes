@@ -99,7 +99,8 @@ export default function Home() {
           </section>
 
           <footer className="pb-6 text-sm text-[var(--muted)]">
-            Demo only — not for real PHI or clinical use.
+            Demo / testing only — not for real PHI or clinical use. Each account is limited
+            to 2 AI consultation generations.
           </footer>
         </div>
       </main>
