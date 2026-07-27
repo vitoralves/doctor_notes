@@ -32,6 +32,37 @@ type UsageToday = {
   day?: string;
 };
 
+function formatApiError(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== "object") return fallback;
+  const detail = (payload as { detail?: unknown }).detail;
+
+  if (typeof detail === "string" && detail.trim()) return detail;
+
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (!item || typeof item !== "object") return null;
+        const entry = item as { msg?: unknown; loc?: unknown };
+        const msg = typeof entry.msg === "string" ? entry.msg : null;
+        if (!msg) return null;
+        const field = Array.isArray(entry.loc)
+          ? entry.loc.filter((part) => part !== "body").join(".")
+          : "";
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .filter((msg): msg is string => Boolean(msg));
+    if (messages.length) return messages.join(" · ");
+  }
+
+  return fallback;
+}
+
 function ConsultationWorkspace() {
   const { getToken } = useAuth();
 
@@ -192,8 +223,7 @@ function ConsultationWorkspace() {
           let message = `Request failed (${response.status})`;
           try {
             const payload = await response.json();
-            if (typeof payload.detail === "string") message = payload.detail;
-            else if (payload.detail?.message) message = payload.detail.message;
+            message = formatApiError(payload, message);
           } catch {
             /* ignore */
           }
@@ -229,12 +259,12 @@ function ConsultationWorkspace() {
         body: JSON.stringify({ visit_sk: activeVisit.sk, format }),
       });
       if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        const message =
-          typeof detail.detail === "string"
-            ? detail.detail
-            : detail.detail?.message || detail.error_type || "Export failed";
-        const requestId = detail.request_id || res.headers.get("x-request-id");
+        const payload = await res.json().catch(() => ({}));
+        const message = formatApiError(
+          payload,
+          payload.error_type || `Export failed (${res.status})`,
+        );
+        const requestId = payload.request_id || res.headers.get("x-request-id");
         throw new Error(requestId ? `${message} (request_id=${requestId})` : message);
       }
       const data = await res.json();
